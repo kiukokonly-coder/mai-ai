@@ -259,9 +259,17 @@ async function send(){
   history.push({role:'user',content:files.length?[...files.flatMap(a=>a.blocks),{type:'text',text:text||'Take a look at this and help me.'}]:text});
   const bub=add('bot','<span class="dots"><span></span><span></span><span></span></span>');
   try{
-    const r=await fetch('/.netlify/functions/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:forApi()})});
-    const raw=await r.text();let d;
-    try{d=JSON.parse(raw)}catch(e){throw new Error('The MAI-ai backend is not working yet. Make sure netlify/functions/chat.js is deployed and GEMINI_API_KEY is set in Netlify.')}
+    let r,d;
+    for(let i=0;;i++){
+      r=await fetch('/.netlify/functions/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:forApi()})});
+      const raw=await r.text();
+      try{d=JSON.parse(raw)}catch(e){d={error:r.status>=500?'The server took too long. Please try again.':'The MAI-ai backend is not working yet. Make sure netlify/functions/chat.js is deployed and GEMINI_API_KEY is set in Netlify.'}}
+      if([502,503,504].includes(r.status)&&i<3){
+        bub.innerHTML='<span class="dots"><span></span><span></span><span></span></span> The model is busy, retrying ('+(i+1)+'/3)...';
+        await new Promise(ok=>setTimeout(ok,2500));continue;
+      }
+      break;
+    }
     if(!r.ok)throw new Error(d.error||'Something went wrong. Please try again.');
     history.push({role:'assistant',content:d.reply});bub.innerHTML=render(d.reply);
   }catch(err){history.pop();bub.textContent=err.message||"Couldn't connect. Please try again."}
