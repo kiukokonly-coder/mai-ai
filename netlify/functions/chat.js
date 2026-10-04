@@ -35,10 +35,11 @@ async function pickModels() {
         return x ? { n, v: Number(x[1]) * 100 + Number(x[2] || 0), lite: !!x[3] } : null;
       })
       .filter(Boolean)
-      .sort((a, b) => (a.lite - b.lite) || (b.v - a.v))
-      .map(o => o.n)
-      .slice(0, 5);
-    if (found.length) { cache = { at: Date.now(), models: found }; return found; }
+      .sort((a, b) => b.v - a.v);
+    const flash = found.filter(o => !o.lite).map(o => o.n), lite = found.filter(o => o.lite).map(o => o.n);
+    const order = [];
+    for (let i = 0; i < 3; i++) { if (flash[i]) order.push(flash[i]); if (lite[i]) order.push(lite[i]); }
+    if (order.length) { cache = { at: Date.now(), models: order }; return order; }
   } catch (e) { /* gamitin ang FALLBACK */ }
   return FALLBACK;
 }
@@ -61,14 +62,14 @@ exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed' });
 
   if (!KEY) {
-    return json(500, { error: 'Wala pang GEMINI_API_KEY sa Netlify. Ilagay ito sa Environment variables, tapos i-deploy ulit.' });
+    return json(500, { error: 'GEMINI_API_KEY is not set in Netlify. Add it under Environment variables, then redeploy.' });
   }
 
   const ip = event.headers['x-nf-client-connection-ip'] || event.headers['x-forwarded-for'] || 'unknown';
   const now = Date.now();
   const recent = (hits.get(ip) || []).filter(t => now - t < WINDOW);
   if (recent.length >= LIMIT) {
-    return json(429, { error: 'Naubos mo na ang limit na 30 tanong kada oras. Balik ka mamaya!' });
+    return json(429, { error: 'You have reached the limit of 30 questions per hour. Please come back later.' });
   }
   recent.push(now);
   hits.set(ip, recent);
@@ -85,7 +86,7 @@ exports.handler = async (event) => {
       generationConfig: { maxOutputTokens: 2048 }
     });
 
-    let last = { status: 500, msg: 'API error' }, sawBusy = false, sawQuota = false;
+    let last = { status: 500, msg: 'API error' }, sawBusy = false, sawQuota = false, tried = [];
 
     for (const model of models) {
       for (let attempt = 0; attempt < 2; attempt++) {
@@ -103,7 +104,7 @@ exports.handler = async (event) => {
           data = await res.json();
         } catch (e) {
           clearTimeout(timer);
-          sawBusy = true;
+          sawBusy = true; tried.push(model + ' timeout');
           break; // subukan ang susunod na model
         }
         clearTimeout(timer);
@@ -111,18 +112,19 @@ exports.handler = async (event) => {
         if (res.ok) {
           const parts = data.candidates?.[0]?.content?.parts || [];
           const reply = parts.map(p => p.text || '').join('');
-          return json(200, { reply: reply || 'Walang naisagot. Subukan mong itanong sa ibang paraan.' });
+          return json(200, { reply: reply || 'No answer came back. Try rephrasing your question.' });
         }
 
         last = { status: res.status, msg: data.error?.message || 'API error' };
+        tried.push(model + ' ' + res.status);
         if (res.status === 503 || res.status === 500) { sawBusy = true; await sleep(700); continue; } // busy: ulitin ng isang beses
         if (res.status === 429) sawQuota = true;
         break; // 429, 404, 400: subukan ang susunod na model
       }
     }
 
-    if (sawBusy) return json(503, { error: 'Busy ang Google Gemini ngayon. Subukan ulit pagkalipas ng ilang segundo.' });
-    if (sawQuota) return json(429, { error: 'Naubos na ang libreng limit ng Gemini sa ngayon. Subukan ulit mamaya.' });
+    if (sawBusy) return json(503, { error: 'Google Gemini is busy right now. Please try again in a few seconds. (' + tried.join(', ') + ')' });
+    if (sawQuota) return json(429, { error: 'The free Gemini limit has been used up for now. Please try again later.' });
     return json(last.status, { error: last.msg });
   } catch (err) {
     return json(500, { error: 'Server error' });
