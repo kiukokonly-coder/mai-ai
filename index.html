@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="tl">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -80,8 +80,8 @@
 <body>
 <div id="nebula"></div><div id="dust"></div><canvas id="stars"></canvas>
 <header>
-  <span class="logo">MAI</span><span class="name">-ai</span><span class="sub">katulong mo sa code</span>
-  <button id="clear" type="button">Bagong chat</button>
+  <span class="logo">MAI</span><span class="name">-ai</span><span class="sub">your coding assistant</span>
+  <button id="clear" type="button">New chat</button>
 </header>
 <main id="main"><div class="wrap" id="chat"></div></main>
 
@@ -89,9 +89,9 @@
   <div class="box">
     <div id="previews"></div>
     <div class="bar">
-      <button class="clip" id="clip" type="button" title="Mag-attach ng file, picture, o video">📎</button>
+      <button class="clip" id="clip" type="button" title="Attach a file, picture, or video">📎</button>
       <input type="file" id="file" multiple hidden accept="image/*,video/*,.pdf,.txt,.md,.json,.csv,.js,.ts,.jsx,.tsx,.py,.html,.css,.java,.c,.cpp,.cs,.php,.go,.rs,.sql,.sh,.yml,.yaml,.xml">
-      <textarea id="q" rows="1" placeholder="Itanong mo ang code mo..."></textarea>
+      <textarea id="q" rows="1" placeholder="Ask about your code..."></textarea>
       <button class="send" id="b">Send</button>
     </div>
   </div>
@@ -171,14 +171,14 @@
 const chat=document.getElementById('chat'),main=document.getElementById('main'),q=document.getElementById('q'),b=document.getElementById('b'),
   fileIn=document.getElementById('file'),prev=document.getElementById('previews');
 let history=[],pending=[];
-const IDEAS=['Ayusin ang error sa code ko','Gumawa ng login form (HTML/CSS/JS)','Ipaliwanag ang async/await','I-review ang code ko'];
+const IDEAS=['Fix an error in my code','Build a login form (HTML/CSS/JS)','Explain async/await','Review my code'];
 const esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const render=t=>t.split(/```/).map((p,i)=>i%2===0?esc(p):'<pre><button type="button" class="copy">Copy</button><code>'+esc(p.replace(/^[\w+#-]*\n/,''))+'</code></pre>').join('');
 const scroll=()=>{main.scrollTop=main.scrollHeight};
 
 function home(){
   history=[];pending=[];drawPrev();
-  chat.innerHTML='<div class="hero"><h1>Ano ang ico-code natin ngayon?</h1><p>Ako si MAI-ai. Pang-code lang ako: magtanong, mag-debug, o mag-attach ng screenshot, file, o video ng error mo.</p><div class="chips" id="chips"></div></div>';
+  chat.innerHTML='<div class="hero"><h1>What are we coding today?</h1><p>I\'m MAI-ai. I only do code: ask questions, debug, or attach a screenshot, file, or video of your error.</p><div class="chips" id="chips"></div></div>';
   IDEAS.forEach(t=>{const e=document.createElement('button');e.type='button';e.className='chip';e.textContent=t;e.onclick=()=>{q.value=t;send()};document.getElementById('chips').appendChild(e)});
 }
 function add(role,html){
@@ -186,7 +186,7 @@ function add(role,html){
   r.innerHTML=role==='user'?'<div class="bubble">'+html+'</div>':'<div class="avatar">MAI</div><div class="bubble">'+html+'</div>';
   chat.appendChild(r);scroll();return r.querySelector('.bubble');
 }
-chat.addEventListener('click',e=>{if(e.target.classList.contains('copy')){navigator.clipboard.writeText(e.target.nextElementSibling.textContent);e.target.textContent='Na-copy!';setTimeout(()=>e.target.textContent='Copy',1200)}});
+chat.addEventListener('click',e=>{if(e.target.classList.contains('copy')){navigator.clipboard.writeText(e.target.nextElementSibling.textContent);e.target.textContent='Copied!';setTimeout(()=>e.target.textContent='Copy',1200)}});
 document.getElementById('clear').onclick=home;
 
 /* ---------- attachments ---------- */
@@ -213,23 +213,23 @@ async function fromVideo(f){
     const r=imgBlock(c);if(!i)thumb=r.thumb;blocks.push(r.block);
   }
   URL.revokeObjectURL(url);
-  blocks.push({type:'text',text:'[Ang '+n+' picture sa itaas ay mga frame mula sa video na "'+f.name+'", sunod-sunod. Walang audio.]'});
+  blocks.push({type:'text',text:'[The '+n+' pictures above are frames from the video "'+f.name+'", in order. No audio.]'});
   return{name:f.name,thumb,blocks};
 }
 async function fromPdf(f){
-  if(f.size>3e6)throw new Error(f.name+' ay masyadong malaki (max 3 MB para sa PDF).');
+  if(f.size>3e6)throw new Error(f.name+' is too large (max 3 MB for PDFs).');
   return{name:f.name,blocks:[{type:'document',source:{type:'base64',media_type:'application/pdf',data:b64(await readAs(f,'readAsDataURL'))}}]};
 }
 async function fromText(f){
-  if(f.size>1e5)throw new Error(f.name+' ay masyadong malaki (max 100 KB para sa code file).');
+  if(f.size>1e5)throw new Error(f.name+' is too large (max 100 KB for code files).');
   return{name:f.name,blocks:[{type:'text',text:'File: '+f.name+'\n```\n'+await readAs(f,'readAsText')+'\n```'}]};
 }
 fileIn.onchange=async()=>{
   for(const f of fileIn.files){
-    if(pending.length>=5){alert('Hanggang 5 attachment lang.');break}
+    if(pending.length>=5){alert('Maximum of 5 attachments.');break}
     try{
       pending.push(f.type.startsWith('image/')?await fromImage(f):f.type.startsWith('video/')?await fromVideo(f):f.type==='application/pdf'?await fromPdf(f):await fromText(f));
-    }catch(e){alert(e.message||('Hindi ko mabasa ang '+f.name))}
+    }catch(e){alert(e.message||("Couldn't read "+f.name))}
   }
   fileIn.value='';drawPrev();
 };
@@ -238,7 +238,7 @@ function drawPrev(){
   prev.innerHTML='';
   pending.forEach((a,i)=>{
     const d=document.createElement('div');d.className='pv';
-    d.innerHTML=(a.thumb?'<img src="'+a.thumb+'">':'')+'<span>'+esc(a.name)+'</span><button type="button" aria-label="Alisin">×</button>';
+    d.innerHTML=(a.thumb?'<img src="'+a.thumb+'">':'')+'<span>'+esc(a.name)+'</span><button type="button" aria-label="Remove">×</button>';
     d.querySelector('button').onclick=()=>{pending.splice(i,1);drawPrev()};
     prev.appendChild(d);
   });
@@ -247,7 +247,7 @@ function drawPrev(){
 /* ---------- send ---------- */
 function forApi(){ // iisang beses lang ipapadala ang picture/PDF, para hindi lumaki ang bayad
   return history.map((m,i)=>i===history.length-1||typeof m.content==='string'?m:
-    {role:m.role,content:m.content.map(c=>c.type==='image'||c.type==='document'?{type:'text',text:'[attachment na naipakita kanina]'}:c)});
+    {role:m.role,content:m.content.map(c=>c.type==='image'||c.type==='document'?{type:'text',text:'[attachment shown earlier]'}:c)});
 }
 async function send(){
   const text=q.value.trim();
@@ -256,15 +256,15 @@ async function send(){
   const files=pending;pending=[];drawPrev();q.value='';b.disabled=true;window.galaxyWarp&&galaxyWarp();
   const shown=(files.length?'<div class="att">'+files.map(a=>a.thumb?'<img src="'+a.thumb+'">':'<span class="tag">📄 '+esc(a.name)+'</span>').join('')+'</div>':'')+esc(text);
   add('user',shown);
-  history.push({role:'user',content:files.length?[...files.flatMap(a=>a.blocks),{type:'text',text:text||'Tingnan mo ito at tulungan mo ako.'}]:text});
+  history.push({role:'user',content:files.length?[...files.flatMap(a=>a.blocks),{type:'text',text:text||'Take a look at this and help me.'}]:text});
   const bub=add('bot','<span class="dots"><span></span><span></span><span></span></span>');
   try{
     const r=await fetch('/.netlify/functions/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:forApi()})});
     const raw=await r.text();let d;
-    try{d=JSON.parse(raw)}catch(e){throw new Error('Hindi pa gumagana ang backend ng MAI-ai. Siguraduhing na-deploy ang netlify/functions/chat.js at nailagay ang ANTHROPIC_API_KEY sa Netlify.')}
-    if(!r.ok)throw new Error(d.error||'May error. Subukan ulit.');
+    try{d=JSON.parse(raw)}catch(e){throw new Error('The MAI-ai backend is not working yet. Make sure netlify/functions/chat.js is deployed and GEMINI_API_KEY is set in Netlify.')}
+    if(!r.ok)throw new Error(d.error||'Something went wrong. Please try again.');
     history.push({role:'assistant',content:d.reply});bub.innerHTML=render(d.reply);
-  }catch(err){history.pop();bub.textContent=err.message||'Hindi maka-connect. Subukan ulit.'}
+  }catch(err){history.pop();bub.textContent=err.message||"Couldn't connect. Please try again."}
   b.disabled=false;q.focus();scroll();
 }
 document.getElementById('f').addEventListener('submit',e=>{e.preventDefault();send()});
