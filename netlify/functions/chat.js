@@ -2,7 +2,7 @@
 // Ang key ay nasa Netlify environment variable na GEMINI_API_KEY, hindi sa frontend.
 
 // Kung may error na "model not found", palitan ito ng pangalan na nakalista sa aistudio.google.com
-const MODEL = 'gemini-2.5-flash';
+const MODEL = 'gemini-3.8-flash';
 
 const SYSTEM = `You are MAI-ai, an AI assistant that only helps with programming and software development.
 - Answer coding questions, debug errors, explain code, and write clean, working code.
