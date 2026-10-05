@@ -14,13 +14,14 @@ Your only job is helping users write, fix, explain, and improve Lua scripts that
 Rules for scripts:
 - Use ONLY the classes, callbacks, global functions, and utilities listed in the REFERENCE below. Never invent functions, methods, or parameters. If something the user wants is not in the reference, say clearly that the API does not provide it and suggest the closest alternative that does exist.
 - Scripts are written in Lua. Register behavior through the callbacks in the reference (for example onPlayerCommandCallback, onPlayerLoginCallback, onPlayerChatCallback, onPlayerDialogCallback, onHTTPRequest) and use the dialog string syntax from the reference for dialogs.
-- Give the COMPLETE, ready-to-paste script in one fenced \`\`\`lua code block, with short comments. Then add a brief explanation of how it works and anything the user must set up (item IDs, role IDs, etc.). Keep the explanation short.
+- For new or short scripts, give the COMPLETE, ready-to-paste script in one fenced \`\`\`lua code block, with short comments. Then add a brief explanation of how it works and anything the user must set up (item IDs, role IDs, etc.). Keep the explanation short.
 - When fixing a script, find the actual bug, show the corrected full script, and say what was wrong.
 - If the request is unclear, make a sensible assumption, state it in one line, and still write the script.
 - Do not write malware, scripts that steal accounts or passwords, or anything meant to attack other servers or players.
 - If the user asks about something unrelated to GTPS Lua scripting, politely say you only help with GTPS Cloud Lua scripts.
 - The user may attach screenshots, files, or frames from a video (no audio). Look at them carefully and help with the script or error they show.
 - Reply in the same language the user writes in (Tagalog, Taglish, or English). Keep code identifiers and comments in English.
+- IMPORTANT: Your answers have a length limit. If the user's script is long (more than about 250 lines), do NOT rewrite the whole script. Show only the functions or sections that change, each as a complete block, and say exactly where each one goes. Never start a huge script you cannot finish.
 
 REFERENCE (official GTPS Cloud Lua API):
 ` + DOCS;
@@ -90,12 +91,12 @@ const run = async (event) => {
     const { messages } = JSON.parse(event.body || '{}');
     if (!Array.isArray(messages) || messages.length === 0) return json(400, { error: 'No messages' });
 
-    const deadline = Date.now() + 25000; // 30 segundo ang max duration (tingnan ang vercel.json)
+    const deadline = Date.now() + 55000; // 30 segundo ang max duration (tingnan ang vercel.json)
     const models = await pickModels();
     const body = JSON.stringify({
       systemInstruction: { parts: [{ text: SYSTEM }] },
       contents: toGemini(messages.slice(-20)),
-      generationConfig: { maxOutputTokens: 2048 }
+      generationConfig: { maxOutputTokens: 8192 }
     });
 
     let last = { status: 500, msg: 'API error' }, sawBusy = false, sawQuota = false, tried = [];
@@ -124,7 +125,8 @@ const run = async (event) => {
         if (res.ok) {
           const parts = data.candidates?.[0]?.content?.parts || [];
           const reply = parts.map(p => p.text || '').join('');
-          return json(200, { reply: reply || 'No answer came back. Try rephrasing your question.' });
+          const cut = data.candidates?.[0]?.finishReason === 'MAX_TOKENS';
+          return json(200, { reply: (reply || 'No answer came back. Try rephrasing your question.') + (cut ? '\n\n[The answer was cut off because it reached the length limit. Type "continue" to get the rest.]' : '') });
         }
 
         last = { status: res.status, msg: data.error?.message || 'API error' };
