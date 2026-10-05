@@ -1,21 +1,10 @@
-// Netlify Function: /.netlify/functions/chat  (bersyon na LIBRE: Google Gemini)
+// Netlify Function: /.netlify/functions/chat  (LIBRE: Google Gemini)
 // Ang key ay nasa Netlify environment variable na GEMINI_API_KEY, hindi sa frontend.
-//
-// BAGO: Suporta na sa malalaking file (video, PDF, atbp.) gamit ang Gemini Files API.
-// Ang maliliit na file (hanggang ~3MB) ay pwede pa ring i-send inline (base64) gaya ng dati.
-// Ang malalaking file ay ina-upload ng browser DIRECT sa Google (hindi dumadaan sa Netlify,
-// kaya hindi tinatamaan ng 6MB limit), tapos reference lang (file uri) ang ipinapadala dito.
-//
-// Mga action ng function na ito (field na "action" sa JSON body):
-//   (wala o "chat")  -> normal na chat
-//   "start-upload"   -> gumagawa ng upload URL para sa malaking file
-//   "file-status"    -> tinitingnan kung ACTIVE (handa na) ang na-upload na file
+// AWTOMATIKONG pipili ng model na available (hindi mo na kailangang palitan ang pangalan kapag nagbago ang Google).
 
-// Kung may error na "model not found", palitan ito ng pangalan na nakalista sa aistudio.google.com
-const MODEL = 'gemini-2.5-flash';
-
-const API = 'https://generativelanguage.googleapis.com';
-const MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024; // 2GB, limit ng Gemini Files API kada file
+const KEY = process.env.GEMINI_API_KEY;
+const BASE = 'https://generativelanguage.googleapis.com/v1beta';
+const FALLBACK = ['gemini-3.8-flash', 'gemini-3.5-flash-lite']; // gagamitin lang kung hindi makuha ang listahan
 
 const SYSTEM = `You are MAI-ai, an AI assistant that only helps with programming and software development.
 - Answer coding questions, debug errors, explain code, and write clean, working code.
@@ -29,17 +18,37 @@ const hits = new Map();
 const LIMIT = 30, WINDOW = 60 * 60 * 1000;
 
 const json = (statusCode, obj) => ({ statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify(obj) });
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-// Ginagawang Gemini format ang mga mensahe (text, picture, PDF, at malalaking file)
+// Tinatanong si Google kung anong mga model ang available, tapos pinipili ang pinakabago (flash muna, flash-lite pagkatapos)
+let cache = { at: 0, models: [] };
+async function pickModels() {
+  if (cache.models.length && Date.now() - cache.at < 60 * 60 * 1000) return cache.models;
+  try {
+    const r = await fetch(`${BASE}/models?pageSize=200`, { headers: { 'x-goog-api-key': KEY }, signal: AbortSignal.timeout(3000) });
+    const d = await r.json();
+    const found = (d.models || [])
+      .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+      .map(m => m.name.replace('models/', ''))
+      .map(n => {
+        const x = n.match(/^gemini-(\d+)(?:\.(\d+))?-flash(-lite)?$/);
+        return x ? { n, v: Number(x[1]) * 100 + Number(x[2] || 0), lite: !!x[3] } : null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.v - a.v);
+    const flash = found.filter(o => !o.lite).map(o => o.n), lite = found.filter(o => o.lite).map(o => o.n);
+    const order = [];
+    for (let i = 0; i < 3; i++) { if (flash[i]) order.push(flash[i]); if (lite[i]) order.push(lite[i]); }
+    if (order.length) { cache = { at: Date.now(), models: order }; return order; }
+  } catch (e) { /* gamitin ang FALLBACK */ }
+  return FALLBACK;
+}
+
+// Ginagawang Gemini format ang mga mensahe (text, picture, PDF)
 function toGemini(messages) {
   return messages.map(m => {
     const blocks = typeof m.content === 'string' ? [{ type: 'text', text: m.content }] : m.content;
     const parts = blocks.map(b => {
-      // Malaking file na na-upload na sa Gemini Files API
-      if (b.type === 'file') {
-        return { fileData: { mimeType: b.media_type, fileUri: b.uri } };
-      }
-      // Maliit na file na kasama mismo (base64)
       if (b.type === 'image' || b.type === 'document') {
         return { inlineData: { mimeType: b.source.media_type, data: b.source.data } };
       }
@@ -49,124 +58,74 @@ function toGemini(messages) {
   });
 }
 
-// Tinitiyak na galing sa Google ang file uri (para hindi ma-abuso)
-function validFileBlocks(messages) {
-  for (const m of messages) {
-    if (typeof m.content === 'string' || !Array.isArray(m.content)) continue;
-    for (const b of m.content) {
-      if (b && b.type === 'file') {
-        if (typeof b.uri !== 'string' || !b.uri.startsWith(API + '/') || typeof b.media_type !== 'string') return false;
-      }
-    }
-  }
-  return true;
-}
-
-// Ibinibilang ang request sa limit ng IP. true = pasok pa, false = lampas na.
-function withinLimit(ip) {
-  const now = Date.now();
-  const recent = (hits.get(ip) || []).filter(t => now - t < WINDOW);
-  if (recent.length >= LIMIT) { hits.set(ip, recent); return false; }
-  recent.push(now);
-  hits.set(ip, recent);
-  return true;
-}
-
-// Hakbang 1 ng malaking upload: kumuha ng upload URL mula sa Google
-async function startUpload(body) {
-  const size = Number(body.size);
-  const mimeType = String(body.mimeType || '');
-  const name = String(body.name || 'file').slice(0, 100);
-
-  if (!Number.isFinite(size) || size <= 0) return json(400, { error: 'Invalid file size' });
-  if (size > MAX_FILE_BYTES) return json(413, { error: 'Masyadong malaki ang file. Hanggang 2GB lang ang kaya ng Gemini.' });
-  if (!mimeType) return json(400, { error: 'Missing file type' });
-
-  const res = await fetch(`${API}/upload/v1beta/files`, {
-    method: 'POST',
-    headers: {
-      'x-goog-api-key': process.env.GEMINI_API_KEY,
-      'X-Goog-Upload-Protocol': 'resumable',
-      'X-Goog-Upload-Command': 'start',
-      'X-Goog-Upload-Header-Content-Length': String(size),
-      'X-Goog-Upload-Header-Content-Type': mimeType,
-      'content-type': 'application/json'
-    },
-    body: JSON.stringify({ file: { display_name: name } })
-  });
-
-  if (res.status === 429) return json(429, { error: 'Naubos na ang libreng limit ng Gemini sa ngayon. Subukan ulit mamaya.' });
-  if (!res.ok) {
-    let msg = 'Hindi nakagawa ng upload URL';
-    try { const d = await res.json(); msg = d.error?.message || msg; } catch (e) {}
-    return json(res.status, { error: msg });
-  }
-
-  const uploadUrl = res.headers.get('x-goog-upload-url');
-  if (!uploadUrl) return json(500, { error: 'Walang upload URL na ibinigay ang Google' });
-  return json(200, { uploadUrl });
-}
-
-// Tinitingnan kung handa na (ACTIVE) ang file. Ang video ay kailangan munang i-process.
-async function fileStatus(body) {
-  const name = String(body.name || '');
-  if (!/^files\/[a-z0-9-]+$/.test(name)) return json(400, { error: 'Invalid file name' });
-
-  const res = await fetch(`${API}/v1beta/${name}`, {
-    headers: { 'x-goog-api-key': process.env.GEMINI_API_KEY }
-  });
-  const data = await res.json();
-  if (!res.ok) return json(res.status, { error: data.error?.message || 'API error' });
-  return json(200, { state: data.state, uri: data.uri, mimeType: data.mimeType });
-}
-
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed' });
 
-  if (!process.env.GEMINI_API_KEY) {
-    return json(500, { error: 'Wala pang GEMINI_API_KEY sa Netlify. Ilagay ito sa Environment variables, tapos i-deploy ulit.' });
+  if (!KEY) {
+    return json(500, { error: 'GEMINI_API_KEY is not set in Netlify. Add it under Environment variables, then redeploy.' });
   }
 
   const ip = event.headers['x-nf-client-connection-ip'] || event.headers['x-forwarded-for'] || 'unknown';
+  const now = Date.now();
+  const recent = (hits.get(ip) || []).filter(t => now - t < WINDOW);
+  if (recent.length >= LIMIT) {
+    return json(429, { error: 'You have reached the limit of 30 questions per hour. Please come back later.' });
+  }
+  recent.push(now);
+  hits.set(ip, recent);
 
   try {
-    const body = JSON.parse(event.body || '{}');
-    const action = body.action || 'chat';
-
-    if (action === 'file-status') {
-      return await fileStatus(body);
-    }
-
-    if (!withinLimit(ip)) {
-      return json(429, { error: 'Naubos mo na ang limit na 30 tanong kada oras. Balik ka mamaya!' });
-    }
-
-    if (action === 'start-upload') {
-      return await startUpload(body);
-    }
-
-    const { messages } = body;
+    const { messages } = JSON.parse(event.body || '{}');
     if (!Array.isArray(messages) || messages.length === 0) return json(400, { error: 'No messages' });
-    if (!validFileBlocks(messages)) return json(400, { error: 'Invalid file reference' });
 
-    const res = await fetch(`${API}/v1beta/models/${MODEL}:generateContent`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM }] },
-        contents: toGemini(messages.slice(-20)),
-        generationConfig: { maxOutputTokens: 2048 }
-      })
+    const deadline = Date.now() + 8500; // 10 segundo ang limit ng Netlify
+    const models = await pickModels();
+    const body = JSON.stringify({
+      systemInstruction: { parts: [{ text: SYSTEM }] },
+      contents: toGemini(messages.slice(-20)),
+      generationConfig: { maxOutputTokens: 2048 }
     });
 
-    const data = await res.json();
-    if (res.status === 429) return json(429, { error: 'Naubos na ang libreng limit ng Gemini sa ngayon. Subukan ulit mamaya.' });
-    if (!res.ok) return json(res.status, { error: data.error?.message || 'API error' });
+    let last = { status: 500, msg: 'API error' }, sawBusy = false, sawQuota = false, tried = [];
 
-    const parts = data.candidates?.[0]?.content?.parts || [];
-    const reply = parts.map(p => p.text || '').join('');
-    if (!reply) return json(200, { reply: 'Walang naisagot. Subukan mong itanong sa ibang paraan.' });
-    return json(200, { reply });
+    for (const model of models) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        if (Date.now() > deadline) break;
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), Math.max(1000, deadline - Date.now()));
+        let res, data;
+        try {
+          res = await fetch(`${BASE}/models/${model}:generateContent`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'x-goog-api-key': KEY },
+            body,
+            signal: ctrl.signal
+          });
+          data = await res.json();
+        } catch (e) {
+          clearTimeout(timer);
+          sawBusy = true; tried.push(model + ' timeout');
+          break; // subukan ang susunod na model
+        }
+        clearTimeout(timer);
+
+        if (res.ok) {
+          const parts = data.candidates?.[0]?.content?.parts || [];
+          const reply = parts.map(p => p.text || '').join('');
+          return json(200, { reply: reply || 'No answer came back. Try rephrasing your question.' });
+        }
+
+        last = { status: res.status, msg: data.error?.message || 'API error' };
+        tried.push(model + ' ' + res.status);
+        if (res.status === 503 || res.status === 500) { sawBusy = true; await sleep(700); continue; } // busy: ulitin ng isang beses
+        if (res.status === 429) sawQuota = true;
+        break; // 429, 404, 400: subukan ang susunod na model
+      }
+    }
+
+    if (sawBusy) return json(503, { error: 'Google Gemini is busy right now. Please try again in a few seconds. (' + tried.join(', ') + ')' });
+    if (sawQuota) return json(429, { error: 'The free Gemini limit has been used up for now. Please try again later.' });
+    return json(last.status, { error: last.msg });
   } catch (err) {
     return json(500, { error: 'Server error' });
   }
