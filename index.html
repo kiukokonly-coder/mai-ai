@@ -80,7 +80,7 @@
 <body>
 <div id="nebula"></div><div id="dust"></div><canvas id="stars"></canvas>
 <header>
-  <span class="logo">MAI</span><span class="name">-ai</span><span class="sub">your coding assistant</span>
+  <span class="logo">MAI</span><span class="name">-ai</span><span class="sub">GTPS Cloud Lua assistant</span>
   <button id="clear" type="button">New chat</button>
 </header>
 <main id="main"><div class="wrap" id="chat"></div></main>
@@ -91,7 +91,7 @@
     <div class="bar">
       <button class="clip" id="clip" type="button" title="Attach a file, picture, or video">📎</button>
       <input type="file" id="file" multiple hidden accept="image/*,video/*,.pdf,.txt,.md,.json,.csv,.js,.ts,.jsx,.tsx,.py,.html,.css,.java,.c,.cpp,.cs,.php,.go,.rs,.sql,.sh,.yml,.yaml,.xml">
-      <textarea id="q" rows="1" placeholder="Ask about your code... (Ctrl+V to paste an image)"></textarea>
+      <textarea id="q" rows="1" placeholder="Describe your script or paste it here... (Ctrl+V for images)"></textarea>
       <button class="send" id="b">Send</button>
     </div>
   </div>
@@ -171,14 +171,14 @@
 const chat=document.getElementById('chat'),main=document.getElementById('main'),q=document.getElementById('q'),b=document.getElementById('b'),
   fileIn=document.getElementById('file'),prev=document.getElementById('previews');
 let history=[],pending=[];
-const IDEAS=['Fix an error in my code','Build a login form (HTML/CSS/JS)','Explain async/await','Review my code'];
+const IDEAS=['Make a /heal command','Welcome message when a player logs in','Daily reward system with a dialog','Fix my Lua script'];
 const esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const render=t=>t.split(/```/).map((p,i)=>i%2===0?esc(p):'<pre><button type="button" class="copy">Copy</button><code>'+esc(p.replace(/^[\w+#-]*\n/,''))+'</code></pre>').join('');
 const scroll=()=>{main.scrollTop=main.scrollHeight};
 
 function home(){
   history=[];pending=[];drawPrev();
-  chat.innerHTML='<div class="hero"><h1>What are we coding today?</h1><p>I\'m MAI-ai. I only do code: ask questions, debug, or attach a screenshot, file, or video of your error.</p><div class="chips" id="chips"></div></div>';
+  chat.innerHTML='<div class="hero"><h1>What GTPS script are we building?</h1><p>I\'m MAI-ai. I write and fix GTPS Cloud Lua scripts: describe what you want, paste your script, or attach a screenshot of your error.</p><div class="chips" id="chips"></div></div>';
   IDEAS.forEach(t=>{const e=document.createElement('button');e.type='button';e.className='chip';e.textContent=t;e.onclick=()=>{q.value=t;send()};document.getElementById('chips').appendChild(e)});
 }
 function add(role,html){
