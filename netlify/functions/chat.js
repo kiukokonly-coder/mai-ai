@@ -1,12 +1,12 @@
-// Netlify Function: /.netlify/functions/chat  (LIBRE: Google Gemini)
-// Ang key ay nasa Netlify environment variable na GEMINI_API_KEY, hindi sa frontend.
+// Vercel Function: /api/chat  (LIBRE: Google Gemini)
+// Ang key ay nasa Vercel environment variable na GEMINI_API_KEY, hindi sa frontend.
 // AWTOMATIKONG pipili ng model na available (hindi mo na kailangang palitan ang pangalan kapag nagbago ang Google).
 
 const KEY = process.env.GEMINI_API_KEY;
 const BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const FALLBACK = ['gemini-3.8-flash', 'gemini-3.5-flash-lite']; // gagamitin lang kung hindi makuha ang listahan
 
-const DOCS = require('./gtps-docs.js');
+const DOCS = require('./_docs.js');
 
 const SYSTEM = `You are MAI-ai, an AI assistant that specializes in writing GTPS Cloud Lua scripts for Growtopia private servers (https://gtps.cloud).
 Your only job is helping users write, fix, explain, and improve Lua scripts that run on GTPS Cloud.
@@ -70,11 +70,11 @@ function toGemini(messages) {
   });
 }
 
-exports.handler = async (event) => {
+const run = async (event) => {
   if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed' });
 
   if (!KEY) {
-    return json(500, { error: 'GEMINI_API_KEY is not set in Netlify. Add it under Environment variables, then redeploy.' });
+    return json(500, { error: 'GEMINI_API_KEY is not set in Vercel. Add it under Settings > Environment Variables, then redeploy.' });
   }
 
   const ip = event.headers['x-nf-client-connection-ip'] || event.headers['x-forwarded-for'] || 'unknown';
@@ -90,7 +90,7 @@ exports.handler = async (event) => {
     const { messages } = JSON.parse(event.body || '{}');
     if (!Array.isArray(messages) || messages.length === 0) return json(400, { error: 'No messages' });
 
-    const deadline = Date.now() + 8500; // 10 segundo ang limit ng Netlify
+    const deadline = Date.now() + 25000; // 30 segundo ang max duration (tingnan ang vercel.json)
     const models = await pickModels();
     const body = JSON.stringify({
       systemInstruction: { parts: [{ text: SYSTEM }] },
@@ -141,4 +141,16 @@ exports.handler = async (event) => {
   } catch (err) {
     return json(500, { error: 'Server error' });
   }
+};
+
+// Adapter: ginagawang Vercel (req, res) ang handler sa itaas
+module.exports = async (req, res) => {
+  const event = {
+    httpMethod: req.method,
+    headers: req.headers || {},
+    body: typeof req.body === 'string' ? req.body : JSON.stringify(req.body || {})
+  };
+  const out = await run(event);
+  res.status(out.statusCode).setHeader('content-type', 'application/json');
+  res.send(out.body);
 };
