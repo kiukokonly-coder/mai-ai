@@ -90,7 +90,7 @@
     <div id="previews"></div>
     <div class="bar">
       <button class="clip" id="clip" type="button" title="Attach a file, picture, or video">📎</button>
-      <input type="file" id="file" multiple hidden accept="image/*,video/*,.pdf,.txt,.md,.json,.csv,.js,.ts,.jsx,.tsx,.py,.html,.css,.java,.c,.cpp,.cs,.php,.go,.rs,.sql,.sh,.yml,.yaml,.xml">
+      <input type="file" id="file" multiple hidden accept="image/*,video/*,.pdf,.lua,.txt,.md,.json,.csv,.js,.ts,.jsx,.tsx,.py,.html,.css,.java,.c,.cpp,.cs,.php,.go,.rs,.sql,.sh,.yml,.yaml,.xml">
       <textarea id="q" rows="1" placeholder="Describe your script or paste it here... (Ctrl+V for images)"></textarea>
       <button class="send" id="b">Send</button>
     </div>
@@ -221,7 +221,7 @@ async function fromPdf(f){
   return{name:f.name,blocks:[{type:'document',source:{type:'base64',media_type:'application/pdf',data:b64(await readAs(f,'readAsDataURL'))}}]};
 }
 async function fromText(f){
-  if(f.size>1e5)throw new Error(f.name+' is too large (max 100 KB for code files).');
+  if(f.size>4e5)throw new Error(f.name+' is too large (max 400 KB). Try sending only the part you need help with.');
   return{name:f.name,blocks:[{type:'text',text:'File: '+f.name+'\n```\n'+await readAs(f,'readAsText')+'\n```'}]};
 }
 async function addFiles(list){
