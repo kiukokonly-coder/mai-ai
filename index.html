@@ -56,6 +56,7 @@
   pre{background:rgba(4,5,20,.85);border:1px solid var(--line);border-radius:12px;padding:14px;margin:10px 0;overflow-x:auto;position:relative;white-space:pre}
   code{font-family:var(--mono);font-size:13px;line-height:1.55;color:#DCE0FF}
   .copy{position:absolute;top:8px;right:8px;background:rgba(139,123,255,.25);color:var(--text);border:1px solid var(--line);border-radius:8px;font:600 12px var(--ui);padding:3px 10px;cursor:pointer}
+  .part{color:var(--muted);font-size:13px;margin-top:10px}
   .dots span{display:inline-block;width:8px;height:8px;margin-right:5px;border-radius:50%;background:var(--cyan);animation:b 1s infinite}
   .dots span:nth-child(2){animation-delay:.15s}.dots span:nth-child(3){animation-delay:.3s}
   @keyframes b{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-6px)}}
@@ -254,6 +255,22 @@ function forApi(){ // iisang beses lang ipapadala ang picture/PDF, para hindi lu
   return history.map((m,i)=>i===history.length-1||typeof m.content==='string'?m:
     {role:m.role,content:m.content.map(c=>c.type==='image'||c.type==='document'?{type:'text',text:'[attachment shown earlier]'}:c)});
 }
+const CONT='Continue exactly where you stopped. Do not repeat anything, do not add any introduction, and do not reopen the code fence. Resume in the middle of the line if needed.';
+async function ask(msgs,cont,bub0,prefix){
+  let r,d;
+  for(let i=0;;i++){
+    r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:msgs,cont:cont})});
+    const raw=await r.text();
+    try{d=JSON.parse(raw)}catch(e){d={error:r.status>=500?'The server took too long. Please try again.':'The MAI-ai backend is not working yet. Make sure api/chat.js is deployed and GEMINI_API_KEY is set in Vercel.'}}
+    if([502,503,504].includes(r.status)&&i<3){
+      bub0.innerHTML=prefix+'<span class="dots"><span></span><span></span><span></span></span> The model is busy, retrying ('+(i+1)+'/3)...';
+      await new Promise(ok=>setTimeout(ok,2500));continue;
+    }
+    break;
+  }
+  if(!r.ok)throw new Error(d.error||'Something went wrong. Please try again.');
+  return d;
+}
 async function send(){
   const text=q.value.trim();
   if(!text&&!pending.length)return;
@@ -264,19 +281,21 @@ async function send(){
   history.push({role:'user',content:files.length?[...files.flatMap(a=>a.blocks),{type:'text',text:text||'Take a look at this and help me.'}]:text});
   const bub=add('bot','<span class="dots"><span></span><span></span><span></span></span>');
   try{
-    let r,d;
-    for(let i=0;;i++){
-      r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:forApi()})});
-      const raw=await r.text();
-      try{d=JSON.parse(raw)}catch(e){d={error:r.status>=500?'The server took too long. Please try again.':'The MAI-ai backend is not working yet. Make sure api/chat.js is deployed and GEMINI_API_KEY is set in Vercel.'}}
-      if([502,503,504].includes(r.status)&&i<3){
-        bub.innerHTML='<span class="dots"><span></span><span></span><span></span></span> The model is busy, retrying ('+(i+1)+'/3)...';
-        await new Promise(ok=>setTimeout(ok,2500));continue;
+    let d=await ask(forApi(),false,bub,'');
+    let full=d.reply,part=1,note='';
+    bub.innerHTML=render(full);
+    try{
+      while(d.cut){
+        if(part>=10||full.split('\n').length>=5000){note='This answer reached the length limit. Type "continue" to get the rest.';break}
+        part++;
+        bub.innerHTML=render(full)+'<div class="part"><span class="dots"><span></span><span></span><span></span></span> Long answer, writing part '+part+'...</div>';scroll();
+        d=await ask([...forApi(),{role:'assistant',content:full},{role:'user',content:CONT}],true,bub,render(full));
+        full+=d.reply;
+        bub.innerHTML=render(full);scroll();
       }
-      break;
-    }
-    if(!r.ok)throw new Error(d.error||'Something went wrong. Please try again.');
-    history.push({role:'assistant',content:d.reply});bub.innerHTML=render(d.reply);
+    }catch(e2){note='Stopped early: '+(e2.message||'error')+' Type "continue" to resume.'}
+    bub.innerHTML=render(full)+(note?'<div class="part">'+esc(note)+'</div>':'');
+    history.push({role:'assistant',content:full});
   }catch(err){history.pop();bub.textContent=err.message||"Couldn't connect. Please try again."}
   b.disabled=false;q.focus();scroll();
 }
